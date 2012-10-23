@@ -79,10 +79,16 @@ Nonterminals
 
     IfBlock
     IfBraced
+    ElifBlock
+    ElifBraced
     IfExpression
     ElseBraced
     EndIfBraced
     
+    IfChangedBlock
+    IfChangedBraced
+    EndIfChangedBraced
+
     IfEqualBlock
     IfEqualBraced
     IfEqualExpression
@@ -96,10 +102,15 @@ Nonterminals
     CustomTag
     Args
 
+    RegroupBlock
+    RegroupBraced
+    EndRegroupBraced
+
     SpacelessBlock
 
     SSITag
 
+    BlockTransBlock
     TransTag    
 
     TemplatetagTag
@@ -118,23 +129,30 @@ Nonterminals
 
 Terminals
     and_keyword
+    as_keyword
     autoescape_keyword
     block_keyword
+    blocktrans_keyword
+    by_keyword
     call_keyword
     close_tag
     close_var
     comment_keyword
     cycle_keyword
+    elif_keyword
     else_keyword
     empty_keyword
     endautoescape_keyword
     endblock_keyword
+    endblocktrans_keyword
     endcomment_keyword
     endfilter_keyword
     endfor_keyword
     endif_keyword
+    endifchanged_keyword
     endifequal_keyword
     endifnotequal_keyword
+    endregroup_keyword
     endspaceless_keyword
     endwith_keyword
     extends_keyword
@@ -143,6 +161,7 @@ Terminals
     for_keyword
     identifier
     if_keyword
+    ifchanged_keyword
     ifequal_keyword
     ifnotequal_keyword
     in_keyword
@@ -156,19 +175,20 @@ Terminals
     open_tag
     open_var
     parsed_keyword
+    regroup_keyword
     spaceless_keyword
     ssi_keyword
     string_literal
     string
     templatetag_keyword
-        openblock_keyword
-        closeblock_keyword
-        openvariable_keyword
-        closevariable_keyword
-        openbrace_keyword
-        closebrace_keyword
-        opencomment_keyword
-        closecomment_keyword
+    openblock_keyword
+    closeblock_keyword
+    openvariable_keyword
+    closevariable_keyword
+    openbrace_keyword
+    closebrace_keyword
+    opencomment_keyword
+    closecomment_keyword
     trans_keyword
     widthratio_keyword
     with_keyword
@@ -176,7 +196,8 @@ Terminals
     '==' '!='
     '>=' '<='
     '>' '<'
-    '(' ')'.
+    '(' ')'
+    '_'.
 
 Rootsymbol
     Elements.
@@ -191,6 +212,7 @@ Elements -> '$empty' : [].
 Elements -> Elements string : '$1' ++ ['$2'].
 Elements -> Elements AutoEscapeBlock : '$1' ++ ['$2'].
 Elements -> Elements BlockBlock : '$1' ++ ['$2'].
+Elements -> Elements BlockTransBlock : '$1' ++ ['$2'].
 Elements -> Elements CallTag : '$1' ++ ['$2'].
 Elements -> Elements CallWithTag : '$1' ++ ['$2'].
 Elements -> Elements CommentBlock : '$1' ++ ['$2'].
@@ -203,8 +225,10 @@ Elements -> Elements ForBlock : '$1' ++ ['$2'].
 Elements -> Elements IfBlock : '$1' ++ ['$2'].
 Elements -> Elements IfEqualBlock : '$1' ++ ['$2'].
 Elements -> Elements IfNotEqualBlock : '$1' ++ ['$2'].
+Elements -> Elements IfChangedBlock : '$1' ++ ['$2'].
 Elements -> Elements IncludeTag : '$1' ++ ['$2'].
 Elements -> Elements NowTag : '$1' ++ ['$2'].
+Elements -> Elements RegroupBlock : '$1' ++ ['$2'].
 Elements -> Elements SpacelessBlock : '$1' ++ ['$2'].
 Elements -> Elements SSITag : '$1' ++ ['$2'].
 Elements -> Elements TemplatetagTag : '$1' ++ ['$2'].
@@ -216,6 +240,7 @@ Elements -> Elements WithBlock : '$1' ++ ['$2'].
 ValueBraced -> open_var Value close_var : '$2'.
 
 Value -> Value '|' Filter : {apply_filter, '$1', '$3'}.
+Value -> '_' '(' Value ')' : {trans, '$3'}.
 Value -> Variable : '$1'.
 Value -> Literal : '$1'.
 
@@ -274,9 +299,14 @@ ForExpression -> ForGroup in_keyword Variable : {'in', '$1', '$3'}.
 ForGroup -> identifier : ['$1'].
 ForGroup -> ForGroup ',' identifier : '$1' ++ ['$3'].
 
-IfBlock -> IfBraced Elements ElseBraced Elements EndIfBraced : {ifelse, '$1', '$2', '$4'}.
+IfBlock -> IfBraced Elements ElseBraced Elements EndIfBraced : {'ifelse', '$1', '$2', '$4'}.
 IfBlock -> IfBraced Elements EndIfBraced : {'if', '$1', '$2'}.
+IfBlock -> IfBraced Elements ElifBlock : {'if', '$1', '$2', ['$3']}.
+ElifBlock -> ElifBraced Elements ElseBraced Elements EndIfBraced : {'ifelse', '$1', '$2', '$4'}.
+ElifBlock -> ElifBraced Elements EndIfBraced : {'if', '$1', '$2'}.
+ElifBlock -> ElifBraced Elements ElifBlock : {'if', '$1', '$2', ['$3']}.
 IfBraced -> open_tag if_keyword IfExpression close_tag : '$3'.
+ElifBraced -> open_tag elif_keyword IfExpression close_tag : '$3'.
 IfExpression -> Value in_keyword Value : {'expr', "in", '$1', '$3'}.
 IfExpression -> Value not_keyword in_keyword Value : {'expr', "not", {'expr', "in", '$1', '$4'}}.
 IfExpression -> Value '==' Value : {'expr', "eq", '$1', '$3'}.
@@ -296,6 +326,12 @@ Unot -> not_keyword IfExpression : {expr, "not", '$2'}.
 ElseBraced -> open_tag else_keyword close_tag.
 EndIfBraced -> open_tag endif_keyword close_tag.
 
+IfChangedBlock -> IfChangedBraced Elements ElseBraced Elements EndIfChangedBraced : {ifchangedelse, '$1', '$2', '$4'}.
+IfChangedBlock -> IfChangedBraced Elements EndIfChangedBraced : {ifchanged, '$1', '$2'}.
+IfChangedBraced -> open_tag ifchanged_keyword close_tag.
+IfChangedBraced -> open_tag ifchanged_keyword Values close_tag : '$3'.
+EndIfChangedBraced -> open_tag endifchanged_keyword close_tag.
+
 IfEqualBlock -> IfEqualBraced Elements ElseBraced Elements EndIfEqualBraced : {ifequalelse, '$1', '$2', '$4'}.
 IfEqualBlock -> IfEqualBraced Elements EndIfEqualBraced : {ifequal, '$1', '$2'}.
 IfEqualBraced -> open_tag ifequal_keyword IfEqualExpression Value close_tag : ['$3', '$4'].
@@ -308,10 +344,17 @@ IfNotEqualBraced -> open_tag ifnotequal_keyword IfNotEqualExpression Value close
 IfNotEqualExpression -> Value : '$1'.
 EndIfNotEqualBraced -> open_tag endifnotequal_keyword close_tag.
 
+RegroupBlock -> RegroupBraced Elements EndRegroupBraced : {regroup, '$1', '$2'}.
+RegroupBraced -> open_tag regroup_keyword Value by_keyword Value as_keyword identifier close_tag : {'$3', '$5', '$7'}.
+EndRegroupBraced -> open_tag endregroup_keyword close_tag.
+
 SpacelessBlock -> open_tag spaceless_keyword close_tag Elements open_tag endspaceless_keyword close_tag : {spaceless, '$4'}.
 
 SSITag -> open_tag ssi_keyword Value close_tag : {ssi, '$3'}.
 SSITag -> open_tag ssi_keyword string_literal parsed_keyword close_tag : {ssi_parsed, '$3'}.
+
+BlockTransBlock -> open_tag blocktrans_keyword close_tag Elements open_tag endblocktrans_keyword close_tag : {blocktrans, [], '$4'}.
+BlockTransBlock -> open_tag blocktrans_keyword with_keyword Args close_tag Elements open_tag endblocktrans_keyword close_tag : {blocktrans, '$4', '$6'}.
 
 TemplatetagTag -> open_tag templatetag_keyword Templatetag close_tag : {templatetag, '$3'}.
 
@@ -349,3 +392,5 @@ Args -> Args identifier '=' Value : '$1' ++ [{'$2', '$4'}].
 
 CallTag -> open_tag call_keyword identifier close_tag : {call, '$3'}.
 CallWithTag -> open_tag call_keyword identifier with_keyword Value close_tag : {call, '$3', '$5'}.
+
+%% vim: syntax=erlang

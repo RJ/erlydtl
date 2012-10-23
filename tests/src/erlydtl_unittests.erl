@@ -87,6 +87,13 @@ tests() ->
         {"if", [
                 {"If/else",
                     <<"{% if var1 %}boo{% else %}yay{% endif %}">>, [{var1, ""}], <<"yay">>},
+                {"If elif",
+		    <<"{% if var1 %}boo{% elif var2 %}yay{% endif %}">>, [{var1, ""}, {var2, "happy"}], <<"yay">>},
+                {"If elif/else",
+		    <<"{% if var1 %}boo{% elif var2 %}sad{% else %}yay{% endif %}">>, [{var1, ""}, {var2, ""}], <<"yay">>},
+                {"If elif/elif/else",
+		    <<"{% if var1 %}boo{% elif var2 %}yay{% elif var3 %}sad{% else %}noo{% endif %}">>, [{var1, ""},
+			{var2, "happy"}, {var3, "not_taken"}], <<"yay">>},
                 {"If",
                     <<"{% if var1 %}boo{% endif %}">>, [{var1, ""}], <<>>},
                 {"If not",
@@ -237,7 +244,32 @@ tests() ->
                     <<"Al\nAlbert\nJo\nJoseph\n">>},
                 {"Access parent loop counters",
                     <<"{% for outer in list %}{% for inner in outer %}({{ forloop.parentloop.counter0 }}, {{ forloop.counter0 }})\n{% endfor %}{% endfor %}">>,
-                    [{'list', [["One", "two"], ["One", "two"]]}], <<"(0, 0)\n(0, 1)\n(1, 0)\n(1, 1)\n">>}
+                    [{'list', [["One", "two"], ["One", "two"]]}], <<"(0, 0)\n(0, 1)\n(1, 0)\n(1, 1)\n">>},
+                {"If changed",
+                    <<"{% for x in list %}{% ifchanged %}{{ x }}\n{% endifchanged %}{% endfor %}">>,
+                    [{'list', ["one", "two", "two", "three", "three", "three"]}], <<"one\ntwo\nthree\n">>},
+                {"If changed/2",
+                    <<"{% for x, y in list %}{% ifchanged %}{{ x|upper }}{% endifchanged %}{% ifchanged %}{{ y|lower }}{% endifchanged %}\n{% endfor %}">>,
+                    [{'list', [["one", "a"], ["two", "A"], ["two", "B"], ["three", "b"], ["three", "c"], ["Three", "b"]]}], <<"ONEa\nTWO\nb\nTHREE\nc\nb\n">>},
+                {"If changed/else",
+                    <<"{% for x in list %}{% ifchanged %}{{ x }}\n{% else %}foo\n{% endifchanged %}{% endfor %}">>,
+                    [{'list', ["one", "two", "two", "three", "three", "three"]}], <<"one\ntwo\nfoo\nthree\nfoo\nfoo\n">>},
+                {"If changed/param",
+                    <<"{% for date in list %}{% ifchanged date.month %} {{ date.month }}:{{ date.day }}{% else %},{{ date.day }}{% endifchanged %}{% endfor %}\n">>,
+                    [{'list', [[{month,"Jan"},{day,1}],[{month,"Jan"},{day,2}],[{month,"Apr"},{day,10}],
+                               [{month,"Apr"},{day,11}],[{month,"May"},{day,4}]]}], 
+                    <<" Jan:1,2 Apr:10,11 May:4\n">>},
+                {"If changed/param2",
+                    <<"{% for x, y in list %}{% ifchanged y|upper %}{{ x|upper }}{% endifchanged %}\n{% endfor %}">>,
+                    [{'list', [["one", "a"], ["two", "A"], ["two", "B"], ["three", "b"], ["three", "c"], ["Three", "b"]]}], <<"ONE\n\nTWO\n\nTHREE\nTHREE\n">>},
+                {"If changed/param2 combined",
+                    <<"{% for x, y in list %}{% ifchanged x y|upper %}{{ x }}{% endifchanged %}\n{% endfor %}">>,
+                    [{'list', [["one", "a"], ["two", "A"], ["two", "B"], ["three", "b"], ["three", "B"], ["three", "c"]]}], <<"one\ntwo\ntwo\nthree\n\nthree\n">>},
+                {"If changed/resolve",
+                    <<"{% for x in list %}{% ifchanged x.name|first %}{{ x.value }}{% endifchanged %}\n{% endfor %}">>,
+                    [{'list', [[{"name", ["nA","nB"]},{"value","1"}],[{"name", ["nA","nC"]},{"value","2"}],
+                               [{"name", ["nB","nC"]},{"value","3"}],[{"name", ["nB","nA"]},{"value","4"}]]}],
+                    <<"1\n\n3\n\n">>}
             ]},
         {"for/empty", [
                 {"Simple loop",
@@ -334,9 +366,27 @@ tests() ->
                 {"Escape is applied last",
                     <<"{{ var1|escape|linebreaksbr }}">>, [{var1, <<"\n">>}],
                     <<"&lt;br /&gt;">>},
-                {"|add:4",
-                    <<"{{ one|add:4 }}">>, [{one, "1"}],
-                    <<"5">>},
+		{"add; lhs number, rhs number",
+		      <<"{{ one|add:4}}">>, [{one, 1}],
+		      <<"5">>},
+		{"add; lhs numeric string, rhs number",
+		      <<"{{ one|add:4}}">>, [{one, "1"}],
+		      <<"5">>},
+		{"add; lhs number, rhs numeric string",
+		      <<"{{ one|add:'4'}}">>, [{one, 1}],
+		      <<"5">>},
+		{"add; lhs non-numeric string, rhs number",
+		      <<"{{ one|add:4}}">>, [{one, "foo"}],
+		      <<"foo4">>},
+		{"add; lhs number, rhs non-numeric string",
+		      <<"{{ one|add:'foo'}}">>, [{one, 1}],
+		      <<"1foo">>},
+		{"add; lhs non-numeric string, rhs non-numeric string",
+		      <<"{{ one|add:'bar'}}">>, [{one, "foo"}],
+		      <<"foobar">>},
+		{"add; lhs numeric string, rhs numeric string",
+		      <<"{{ one|add:'4'}}">>, [{one, "1"}],
+		      <<"5">>},
                 {"|addslashes",
                     <<"{{ var1|addslashes }}">>, [{var1, "Jimmy's \"great\" meats'n'things"}],
                     <<"Jimmy\\'s \\\"great\\\" meats\\'n\\'things">>},
@@ -374,6 +424,13 @@ tests() ->
                    <<"{{ var1|default_if_none:\"foo\" }}">>, [], <<"foo">>},
                 {"|default_if_none:\"foo\" 2",
                     <<"{{ var1|default_if_none:\"foo\" }}">>, [{var1, "bar"}], <<"bar">>},
+		{"|dictsort 1",
+		 <<"{{ var1|dictsort:\"foo\" }}">>,
+		 [{var1,[[{foo,2}],[{foo,1}]]}], <<"{foo,1}{foo,2}">>},
+	        {"|dictsort 2",
+		 <<"{{ var1|dictsort:\"foo.bar\" }}">>,
+		 [{var1,[[{foo,[{bar,2}]}],[{foo,[{bar,1}]}]]}],
+		 <<"{foo,[{bar,1}]}{foo,[{bar,2}]}">>},
                 {"|divisibleby:\"3\"",
                     <<"{% if var1|divisibleby:\"3\" %}yay{% endif %}">>, [{var1, 21}], <<"yay">>},
                 {"|divisibleby:\"3\"",
@@ -766,6 +823,15 @@ tests() ->
                 {"|title (pre-formatted)",
                     <<"{{ \"My Title Case\"|title }}">>, [],
                     <<"My Title Case">>},
+                {"|truncatechars:0",
+                    <<"{{ var1|truncatechars:0 }}">>, [{var1, "Empty Me"}],
+                    <<"">>},
+                {"|truncatechars:11",
+                    <<"{{ var1|truncatechars:11 }}">>, [{var1, "Truncate Me Please"}],
+                    <<"Truncate Me...">>},
+                {"|truncatechars:17",
+                    <<"{{ var1|truncatechars:17 }}">>, [{var1, "Don't Truncate Me"}],
+                    <<"Don't Truncate Me">>},
                 {"|truncatewords:0",
                     <<"{{ var1|truncatewords:0 }}">>, [{var1, "Empty Me"}],
                     <<"">>},
@@ -901,6 +967,37 @@ tests() ->
                 [],
                 <<"baz">>}
         ]},
+    {"regroup", [
+            {"Ordered", <<"{% regroup people by gender as gender_list %}{% for gender in gender_list %}{{ gender.grouper }}\n{% for item in gender.list %}{{ item.first_name }}\n{% endfor %}{% endfor %}{% endregroup %}">>, 
+                [{people, [[{first_name, "George"}, {gender, "Male"}], [{first_name, "Bill"}, {gender, "Male"}],
+                            [{first_name, "Margaret"}, {gender, "Female"}], [{first_name, "Condi"}, {gender, "Female"}]]}],
+                <<"Male\nGeorge\nBill\nFemale\nMargaret\nCondi\n">>},
+            {"Unordered", <<"{% regroup people by gender as gender_list %}{% for gender in gender_list %}{{ gender.grouper }}\n{% for item in gender.list %}{{ item.first_name }}\n{% endfor %}{% endfor %}{% endregroup %}">>, 
+                [{people, [[{first_name, "George"}, {gender, "Male"}], 
+                            [{first_name, "Margaret"}, {gender, "Female"}], 
+                            [{first_name, "Condi"}, {gender, "Female"}],
+                            [{first_name, "Bill"}, {gender, "Male"}]
+                        ]}],
+                <<"Male\nGeorge\nFemale\nMargaret\nCondi\nMale\nBill\n">>},
+	    {"NestedOrdered", <<"{% regroup people by name.last as lastname_list %}{% for lastname in lastname_list %}{{ lastname.grouper }}\n{% for item in lastname.list %}{{ item.name.first }}\n{% endfor %}{% endfor %}{% endregroup %}">>,
+                [{people, [[{name, [{first,"George"},{last,"Costanza"}]}],
+			   [{name, [{first,"Margaret"},{last,"Costanza"}]}],
+			   [{name, [{first,"Bill"},{last,"Buffalo"}]}],
+			   [{name, [{first,"Condi"},{last,"Buffalo"}]}]]}],
+               <<"Costanza\nGeorge\nMargaret\nBuffalo\nBill\nCondi\n">>},
+	    {"NestedUnordered", <<"{% regroup people by name.last as lastname_list %}{% for lastname in lastname_list %}{{ lastname.grouper }}\n{% for item in lastname.list %}{{ item.name.first }}\n{% endfor %}{% endfor %}{% endregroup %}">>,
+                [{people, [[{name, [{first,"George"},{last,"Costanza"}]}],
+			   [{name, [{first,"Bill"},{last,"Buffalo"}]}],
+			   [{name, [{first,"Margaret"},{last,"Costanza"}]}],
+			   [{name, [{first,"Condi"},{last,"Buffalo"}]}]]}],
+               <<"Costanza\nGeorge\nBuffalo\nBill\nCostanza\nMargaret\nBuffalo\nCondi\n">>},
+	    {"Filter", <<"{% regroup people|dictsort:\"name.last\" by name.last as lastname_list %}{% for lastname in lastname_list %}{{ lastname.grouper }}\n{% for item in lastname.list %}{{ item.name.first }}\n{% endfor %}{% endfor %}{% endregroup %}">>,
+		  [{people, [[{name, [{first,"George"},{last,"Costanza"}]}],
+			     [{name, [{first,"Bill"},{last,"Buffalo"}]}],
+			     [{name, [{first,"Margaret"},{last,"Costanza"}]}],
+			     [{name, [{first,"Condi"},{last,"Buffalo"}]}]]}],
+		  <<"Buffalo\nBill\nCondi\nCostanza\nGeorge\nMargaret\n">>}
+        ]},
     {"spaceless", [
             {"Beginning", <<"{% spaceless %}    <b>foo</b>{% endspaceless %}">>, [], <<"<b>foo</b>">>},
             {"Middle", <<"{% spaceless %}<b>foo</b>  <b>bar</b>{% endspaceless %}">>, [], <<"<b>foo</b><b>bar</b>">>},
@@ -922,20 +1019,30 @@ tests() ->
                 <<"Hello {% trans \"Hi\" %}">>, [], <<"Hello Hi">>
             },
             {"trans functional reverse locale",
-                <<"Hello {% trans \"Hi\" %}">>, [], none, [{locale, "reverse"}], <<"Hello iH">>
+                <<"Hello {% trans \"Hi\" %}">>, [], [], [{locale, "reverse"}], <<"Hello iH">>
             },
             {"trans literal at run-time",
-                <<"Hello {% trans \"Hi\" %}">>, [], fun("Hi") -> "Konichiwa" end, [],
+                <<"Hello {% trans \"Hi\" %}">>, [], [{translation_fun, fun("Hi") -> "Konichiwa" end}], [],
                 <<"Hello Konichiwa">>},
             {"trans variable at run-time",
-                <<"Hello {% trans var1 %}">>, [{var1, "Hi"}], fun("Hi") -> "Konichiwa" end, [],
+                <<"Hello {% trans var1 %}">>, [{var1, <<"Hi">>}], [{translation_fun, fun(<<"Hi">>) -> <<"Konichiwa">> end}], [],
                 <<"Hello Konichiwa">>},
             {"trans literal at run-time: No-op",
-                <<"Hello {% trans \"Hi\" noop %}">>, [], fun("Hi") -> "Konichiwa" end, [],
+                <<"Hello {% trans \"Hi\" noop %}">>, [], [{translation_fun, fun("Hi") -> <<"Konichiwa">> end}], [],
                 <<"Hello Hi">>},
             {"trans variable at run-time: No-op",
-                <<"Hello {% trans var1 noop %}">>, [{var1, "Hi"}], fun("Hi") -> "Konichiwa" end, [],
+                <<"Hello {% trans var1 noop %}">>, [{var1, <<"Hi">>}], [{translation_fun, fun(<<"Hi">>) -> <<"Konichiwa">> end}], [],
                 <<"Hello Hi">>}
+        ]},
+    {"blocktrans",
+        [
+            {"blocktrans default locale",
+                <<"{% blocktrans %}Hello{% endblocktrans %}">>, [], <<"Hello">>},
+            {"blocktrans choose locale",
+                <<"{% blocktrans %}Hello, {{ name }}{% endblocktrans %}">>, [{name, "Mr. President"}], [{locale, "de"}],
+                [{blocktrans_locales, ["de"]}, {blocktrans_fun, fun("Hello, {{ name }}", "de") -> <<"Guten tag, {{ name }}">> end}], <<"Guten tag, Mr. President">>},
+            {"blocktrans with args",
+                <<"{% blocktrans with var1=foo %}{{ var1 }}{% endblocktrans %}">>, [{foo, "Hello"}], <<"Hello">>}
         ]},
     {"widthratio", [
             {"Literals", <<"{% widthratio 5 10 100 %}">>, [], <<"50">>},
@@ -948,34 +1055,39 @@ tests() ->
                 <<"{% with a=b %}{{ a }}{% endwith %}">>, [{b, "foo"}], <<"foo">>},
             {"Cache multiple",
                 <<"{% with alpha=1 beta=b %}{{ alpha }}/{{ beta }}{% endwith %}">>, [{b, 2}], <<"1/2">>}
+        ]},
+     {"unicode", [
+             {"(tm) somewhere",
+                 <<"™">>, [], <<"™">>}
         ]}
     ].
  
 run_tests() ->
     io:format("Running unit tests...~n"),
+    DefaultOptions = [],
     Failures = lists:foldl(
         fun({Group, Assertions}, GroupAcc) ->
                 io:format(" Test group ~p...~n", [Group]),
                 lists:foldl(fun
                         ({Name, DTL, Vars, Output}, Acc) ->
-                            process_unit_test(erlydtl:compile(DTL, erlydtl_running_test, []),
-                                Vars, none, Output, Acc, Group, Name);
-                        ({Name, DTL, Vars, Dictionary, Output}, Acc) ->
-                            process_unit_test(erlydtl:compile(DTL, erlydtl_running_test, []),
-                                Vars, Dictionary, Output, Acc, Group, Name);
-                        ({Name, DTL, Vars, Dictionary, CompilerOpts, Output}, Acc) ->
-                            process_unit_test(erlydtl:compile(DTL, erlydtl_running_test, CompilerOpts),
-                                Vars, Dictionary, Output, Acc, Group, Name)
+                            process_unit_test(erlydtl:compile(DTL, erlydtl_running_test, DefaultOptions),
+                                Vars, [], Output, Acc, Group, Name);
+                        ({Name, DTL, Vars, RenderOpts, Output}, Acc) ->
+                            process_unit_test(erlydtl:compile(DTL, erlydtl_running_test, DefaultOptions),
+                                Vars, RenderOpts, Output, Acc, Group, Name);
+                        ({Name, DTL, Vars, RenderOpts, CompilerOpts, Output}, Acc) ->
+                            process_unit_test(erlydtl:compile(DTL, erlydtl_running_test, CompilerOpts ++ DefaultOptions),
+                                Vars, RenderOpts, Output, Acc, Group, Name)
                             end, GroupAcc, Assertions)
         end, [], tests()),
  
     io:format("Unit test failures: ~p~n", [lists:reverse(Failures)]).
  
-process_unit_test(CompiledTemplate, Vars, Dictionary, Output,Acc, Group, Name) ->
+process_unit_test(CompiledTemplate, Vars, RenderOpts, Output,Acc, Group, Name) ->
         case CompiledTemplate of
              {ok, _} ->
-                   {ok, IOList} = erlydtl_running_test:render(Vars, Dictionary),
-                   {ok, IOListBin} = erlydtl_running_test:render(vars_to_binary(Vars), Dictionary),
+                   {ok, IOList} = erlydtl_running_test:render(Vars, RenderOpts),
+                   {ok, IOListBin} = erlydtl_running_test:render(vars_to_binary(Vars), RenderOpts),
                    case {iolist_to_binary(IOList), iolist_to_binary(IOListBin)} of
                         {Output, Output} ->
                                   Acc;

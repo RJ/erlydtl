@@ -3,11 +3,11 @@ ErlyDTL
 
 ErlyDTL compiles Django Template Language to Erlang bytecode.
 
-*Supported tags*: autoescape, block, comment, cycle, extends, filter, firstof, for, if, ifequal, ifnotequal, include, now, spaceless, ssi, templatetag, trans, widthratio, with
+*Supported tags*: autoescape, block, blocktrans, comment, cycle, extends, filter, firstof, for, if, ifchanged, ifequal, ifnotequal, include, now, regroup, spaceless, ssi, templatetag, trans, widthratio, with
 
-_Unsupported tags_: csrf_token, ifchanged, regroup, url
+_Unsupported tags_: csrf_token, url
 
-*Supported filters*: add, addslashes, capfirst, center, cut, date, default, default_if_none, dictsort, dictsortreversed, divisibleby, escape, escapejs, filesizeformat, first, fix_ampersands, floatformat, force_escape, format_integer, format_number, get_digit, iriencode, join, last, length, length_is, linebreaks, linebreaksbr, linenumbers, ljust, lower, make_list, phonenumeric, pluralize, pprint, random, random_num, random_range, removetags, rjust, safe, safeseq, slice, slugify, stringformat, striptags, time, timesince, timeuntil, title, truncatewords, truncatewords_html, unordered_list, upper, urlencode, urlize, urlizetrunc, wordcount, wordwrap, yesno
+*Supported filters*: add, addslashes, capfirst, center, cut, date, default, default_if_none, dictsort, dictsortreversed, divisibleby, escape, escapejs, filesizeformat, first, fix_ampersands, floatformat, force_escape, format_integer, format_number, get_digit, iriencode, join, last, length, length_is, linebreaks, linebreaksbr, linenumbers, ljust, lower, make_list, phonenumeric, pluralize, pprint, random, random_num, random_range, removetags, rjust, safe, safeseq, slice, slugify, stringformat, striptags, time, timesince, timeuntil, title, truncatechars, truncatewords, truncatewords_html, unordered_list, upper, urlencode, urlize, urlizetrunc, wordcount, wordwrap, yesno
 
 _Unsupported filters_: _none_
 
@@ -51,10 +51,26 @@ defaults to the compiled template's directory.
 E.g. if $custom_tags_dir/foo contains `<b>{{ bar }}</b>`, then `{% foo bar=100 %}` 
 will evaluate to `<b>100</b>`. Get it?
 
-* `custom_tags_module` - A module to be used for handling custom tags. Each custom
-tag should correspond to an exported function, e.g.: 
+* `custom_tags_modules` - A list of modules to be used for handling custom
+tags. The modules will be searched in order and take precedence over
+`custom_tags_dir`. Each custom tag should correspond to an exported function,
+e.g.: 
 
-    some_tag(Variables, TranslationFun) -> iolist()
+    some_tag(Variables, Context) -> iolist()
+
+The `Context` is specified at render-time with the `custom_tags_context` option.
+
+* `custom_filters_modules` - A list of modules to be used for handling custom
+filters. The modules will be searched in order and take precedence over the
+built-in filters. Each custom filter should correspond to an exported filter,
+e.g.
+
+    some_filter(Value) -> iolist()
+
+If the filter takes an argument (e.g. "foo:2"), the argument will be also be
+passed in:
+
+    some_filter(Value, Arg) -> iolist()
 
 * `vars` - Variables (and their values) to evaluate at compile-time rather than
 render-time. 
@@ -73,6 +89,18 @@ will ask gettext_server for the string value on the provided locale.
 For example, adding {locale, "en_US"} will call {key2str, Key, "en_US"}
 for all string marked as trans (`{% trans "StringValue" %}` on templates).
 See README_I18N.
+
+* `blocktrans_fun` - A two-argument fun to use for translating `blocktrans`
+blocks. This will be called once for each pair of `blocktrans` block and locale
+specified in `blocktrans_locales`. The fun should take the form:
+
+    Fun(Block::string(), Locale::string()) -> <<"ErlyDTL code">> | default
+
+* `blocktrans_locales` - A list of locales to be passed to `blocktrans_fun`.
+Defaults to [].
+
+* `binary_strings` - Whether to compile strings as binary terms (rather than
+lists). Defaults to `true`.
 
 
 Helper compilation
@@ -105,17 +133,31 @@ values can be atoms, strings, binaries, or (nested) variables.
 
 IOList is the rendered template.
 
-    my_compiled_template:render(Variables, TranslationFun) -> 
+    my_compiled_template:render(Variables, Options) -> 
             {ok, IOList} | {error, Err}
 
-Same as `render/1`, but TranslationFun is a fun/1 that will be used to 
-translate strings appearing inside `{% trans %}` tags. The simplest
-TranslationFun would be `fun(Val) -> Val end`
+Same as `render/1`, but with the following options:
+
+* `translation_fun` - A fun/1 that will be used to translate strings appearing
+inside `{% trans %}` tags. The simplest TranslationFun would be `fun(Val) ->
+Val end`
+
+* `locale` - A string specifying the current locale, for use with the
+`blocktrans_fun` compile-time option.
+
+* `custom_tags_context` - A value that will be passed to custom tags.
 
     my_compiled_template:translatable_strings() -> [String]
 
-List of strings appearing in `{% trans %}` tags that can be overridden 
-with a dictionary passed to `render/2`.
+List of strings appearing in `{% trans %}` tags that can be overridden with
+a dictionary passed to `render/2`.
+
+    my_compiled_template:translated_blocks() -> [String]
+
+List of strings appearing in `{% blocktrans %}...{% endblocktrans %}` blocks;
+the translations (which can contain ErlyDTL code) are hard-coded into the
+module and appear at render-time. To get a list of translatable blocks before
+compile-time, use the provided `blocktrans_extractor` module.
 
     my_compiled_template:source() -> {FileName, CheckSum}
 
@@ -126,6 +168,17 @@ Name and checksum of the original template file.
 List of names/checksums of templates included by the original template
 file. Useful for frameworks that recompile a template only when the
 template's dependencies change.
+
+    my_compiled_template:variables() -> [Variable::atom()]
+
+Sorted list of unique variables used in the template's body. The list can
+be used for determining which variable bindings need to be passed to the
+render/3 function.
+
+Differences from standard Django Template Language
+--------------------------------------------------
+
+The "regroup" tag must have an ending "endregroup" tag.
 
 
 Tests

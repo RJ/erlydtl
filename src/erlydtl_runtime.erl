@@ -2,19 +2,26 @@
 
 -compile(export_all).
 
+-define(IFCHANGED_CONTEXT_VARIABLE, erlydtl_ifchanged_context).
+
 find_value(_, undefined) ->
     undefined;
 find_value(Key, Fun) when is_function(Fun, 1) ->
     Fun(Key);
-find_value(Key, L) when is_list(L) ->
-    case proplists:get_value(Key, L) of
-        undefined ->
-            case proplists:get_value(atom_to_list(Key), L) of
-                undefined ->
-                    proplists:get_value(list_to_binary(atom_to_list(Key)), L);
-                Val -> Val
-            end;
-        Val -> Val
+find_value(Key, L) when is_atom(Key), is_list(L) ->
+    case lists:keyfind(Key, 1, L) of
+        false           -> find_value(atom_to_list(Key), L);
+        {Key, Value}    -> Value
+    end;
+find_value(Key, L) when is_list(Key), is_list(L) ->
+    case lists:keyfind(Key, 1, L) of
+        false           -> find_value(list_to_binary(Key), L);
+        {Key, Value}    -> Value
+    end;
+find_value(Key, L) when is_binary(Key), is_list(L) ->
+    case lists:keyfind(Key, 1, L) of
+        false           -> undefined;
+        {Key, Value}    -> Value
     end;
 find_value(Key, {GBSize, GBData}) when is_integer(GBSize) ->
     case gb_trees:lookup(Key, {GBSize, GBData}) of
@@ -42,6 +49,13 @@ find_value(Key, Tuple) when is_tuple(Tuple) ->
             end
     end.
 
+find_deep_value([Key|Rest],Item) ->
+    case find_value(Key,Item) of
+	undefined -> undefined;
+	NewItem -> find_deep_value(Rest,NewItem)
+    end;
+find_deep_value([],Item) -> Item.
+
 fetch_value(Key, Data) ->
     case find_value(Key, Data) of
         undefined ->
@@ -50,13 +64,30 @@ fetch_value(Key, Data) ->
             Val
     end.
 
+regroup(List, Attribute) ->
+    regroup(List, Attribute, []).
+
+regroup([], _, []) ->
+    [];
+regroup([], _, [[{grouper, LastGrouper}, {list, LastList}]|Acc]) ->
+    lists:reverse([[{grouper, LastGrouper}, {list, lists:reverse(LastList)}]|Acc]);
+regroup([Item|Rest], Attribute, []) ->
+    regroup(Rest, Attribute, [[{grouper, find_deep_value(Attribute, Item)}, {list, [Item]}]]);
+regroup([Item|Rest], Attribute, [[{grouper, PrevGrouper}, {list, PrevList}]|Acc]) ->
+    case find_deep_value(Attribute, Item) of
+        Value when Value =:= PrevGrouper ->
+            regroup(Rest, Attribute, [[{grouper, PrevGrouper}, {list, [Item|PrevList]}]|Acc]);
+        Value ->
+            regroup(Rest, Attribute, [[{grouper, Value}, {list, [Item]}], [{grouper, PrevGrouper}, {list, lists:reverse(PrevList)}]|Acc])
+    end.
+
 translate(_, none, Default) ->
     Default;
-translate(String, TranslationFun, Default) when is_binary(String) ->
-    translate(binary_to_list(String), TranslationFun, Default);
 translate(String, TranslationFun, Default) when is_function(TranslationFun) ->
     case TranslationFun(String) of
         undefined -> Default;
+        <<"">> -> Default;
+        "" -> Default;
         Str -> Str
     end.
 
@@ -153,23 +184,28 @@ is_true(V) ->
 'lt'(_, _) ->
     false.
 
-stringify_final(In) ->
-   stringify_final(In, []).
-stringify_final([], Out) ->
-   lists:reverse(Out);
-stringify_final([El | Rest], Out) when is_atom(El) ->
-   stringify_final(Rest, [atom_to_list(El) | Out]);
-stringify_final([El | Rest], Out) when is_list(El) ->
-   stringify_final(Rest, [stringify_final(El) | Out]);
-stringify_final([El | Rest], Out) when is_tuple(El) ->
-   stringify_final(Rest, [io_lib:print(El) | Out]);
-stringify_final([El | Rest], Out) ->
-   stringify_final(Rest, [El | Out]).
+stringify_final(In, BinaryStrings) ->
+    stringify_final(In, [], BinaryStrings).
+
+stringify_final([], Out, _) ->
+    lists:reverse(Out);
+stringify_final([El | Rest], Out, false = BinaryStrings) when is_atom(El) ->
+    stringify_final(Rest, [atom_to_list(El) | Out], BinaryStrings);
+stringify_final([El | Rest], Out, true = BinaryStrings) when is_atom(El) ->
+    stringify_final(Rest, [list_to_binary(atom_to_list(El)) | Out], BinaryStrings);
+stringify_final([El | Rest], Out, BinaryStrings) when is_list(El) ->
+    stringify_final(Rest, [stringify_final(El, BinaryStrings) | Out], BinaryStrings);
+stringify_final([El | Rest], Out, false = BinaryStrings) when is_tuple(El) ->
+    stringify_final(Rest, [io_lib:print(El) | Out], BinaryStrings);
+stringify_final([El | Rest], Out, true = BinaryStrings) when is_tuple(El) ->
+    stringify_final(Rest, [list_to_binary(io_lib:print(El)) | Out], BinaryStrings);
+stringify_final([El | Rest], Out, BinaryStrings) ->
+    stringify_final(Rest, [El | Out], BinaryStrings).
 
 init_counter_stats(List) ->
     init_counter_stats(List, undefined).
 
-init_counter_stats(List, Parent) ->
+init_counter_stats(List, Parent) when is_list(List) ->
     [{counter, 1}, 
         {counter0, 0}, 
         {revcounter, length(List)}, 
@@ -186,6 +222,44 @@ increment_counter_stats([{counter, Counter}, {counter0, Counter0}, {revcounter, 
         {revcounter0, RevCounter0 - 1},
         {first, false}, {last, RevCounter0 =:= 1},
         {parentloop, Parent}].
+
+forloop(Fun, Acc0, Values) ->
+    push_ifchanged_context(),
+    Result = lists:mapfoldl(Fun, Acc0, Values),
+    pop_ifchanged_context(),
+    Result.
+
+push_ifchanged_context() ->
+    IfChangedContextStack = case get(?IFCHANGED_CONTEXT_VARIABLE) of
+        undefined -> [];
+        Stack -> Stack
+    end,
+    put(?IFCHANGED_CONTEXT_VARIABLE, [[]|IfChangedContextStack]).
+
+pop_ifchanged_context() ->
+    [_|Rest] = get(?IFCHANGED_CONTEXT_VARIABLE),
+    put(?IFCHANGED_CONTEXT_VARIABLE, Rest).
+
+ifchanged(Expressions) ->
+    [IfChangedContext|Rest] = get(?IFCHANGED_CONTEXT_VARIABLE),
+    {Result, NewContext} = lists:foldl(fun (Expr, {ProvResult, Context}) when ProvResult == true ->
+                                               {_, NContext} = ifchanged2(Expr, Context),
+                                               {true, NContext};
+                                           (Expr, {_ProvResult, Context}) ->
+                                               ifchanged2(Expr, Context)
+                                       end, {false, IfChangedContext}, Expressions),
+    put(?IFCHANGED_CONTEXT_VARIABLE, [NewContext|Rest]),
+    Result.
+
+ifchanged2({Key, Value}, IfChangedContext) ->
+    PreviousValue = proplists:get_value(Key, IfChangedContext),
+    if
+        PreviousValue =:= Value ->
+            {false, IfChangedContext};
+        true ->
+            NewContext = [{Key, Value}|proplists:delete(Key, IfChangedContext)],
+            {true, NewContext}
+    end.
 
 cycle(NamesTuple, Counters) when is_tuple(NamesTuple) ->
     element(fetch_value(counter0, Counters) rem size(NamesTuple) + 1, NamesTuple).
